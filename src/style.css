@@ -1,0 +1,256 @@
+/* --- 全局与布局 --- */
+/*
+ * 为页面主体和 body 设置基本样式，移除默认边距并隐藏滚动条。
+ */
+body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden; /* 防止滚动条出现 */
+    background-color: #ffffff;
+    color: #000000;
+}
+
+/*
+ * 定义主画布，使其占据整个视口并作为底层背景。
+ */
+#canvas-html {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+}
+
+/* --- 控制台 --- */
+/*
+ * 控制台容器的整体样式，实现居中、黑色背景和圆角。
+ */
+#console-html {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #000000;
+    color: #ffffff;
+    padding: 0;
+    border-radius: 6px;
+    z-index: 10;
+    display: flex;
+    gap: 0;
+    align-items: center;
+    -webkit-user-select: none; /* Safari */
+    -ms-user-select: none; /* IE 10+ */
+    user-select: none; /* Standard syntax */
+}
+
+/*
+ * 控制台内通用按钮的基本样式。
+ */
+.console-button {
+    background-color: transparent;
+    color: #ffffff;
+    border: none;
+    padding: 12px 15px;
+    min-height: 24px;
+    border-radius: 0;
+    cursor: pointer;
+    font-size: 14px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/*
+ * 控制台按钮的悬停效果。
+ */
+.console-button:hover {
+    background-color: #333333;
+}
+
+/*
+ * 清空按钮的特殊颜色。
+ */
+.console-button.clear {
+    background-color: #a83232;
+}
+
+.console-button.clear:hover {
+    background-color: #c74a4a;
+}
+
+/*
+ * 禁用状态下的按钮和下拉菜单触发器样式。
+ */
+.dropdown-container.disabled .dropdown-trigger,
+.console-button.disabled {
+    background-color: transparent;
+    color: #666666;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* 特别处理：使禁用的删除按钮保持红色背景 */
+.console-button.clear.disabled {
+    background-color: #a83232;
+    color: #c48b8b;
+}
+
+/* 覆盖禁用按钮的悬停效果 */
+.console-button.disabled:hover {
+    background-color: transparent;
+}
+
+/*
+ * 下拉菜单组件的容器。
+ */
+.dropdown-container {
+    position: relative;
+    display: inline-block;
+}
+
+/*
+ * 下拉菜单的选项面板，默认隐藏。
+ */
+.dropdown-options {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #000000;
+    padding: 0;
+    border-radius: 0 0 6px 6px;
+    z-index: 11;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    visibility: hidden;
+    opacity: 0;
+    overflow: hidden;
+}
+
+/*
+ * 为控制台的首个和末尾元素设置圆角，使其整体呈圆角矩形。
+ */
+#console-html > .console-button:first-child,
+#console-html > .dropdown-container:first-child > .dropdown-trigger {
+    border-radius: 6px 0 0 6px;
+}
+#console-html > .console-button:last-child,
+#console-html > .dropdown-container:last-child > .dropdown-trigger {
+    border-radius: 0 6px 6px 0;
+}
+
+/*
+ * 鼠标悬停在下拉菜单容器上时，显示选项面板。
+ */
+.dropdown-container:hover .dropdown-options {
+    visibility: visible;
+    opacity: 1;
+}
+
+/*
+ * 下拉菜单中被选中项的样式。
+ */
+.dropdown-option.selected {
+    background-color: #333333;
+    color: #666666;
+    pointer-events: none;
+}
+
+/*
+ * 禁用状态下下拉菜单箭头的颜色。
+ */
+.dropdown-container.disabled .dropdown-trigger::after {
+    border-top-color: #666666;
+}
+
+/*
+ * 确保禁用的下拉菜单在悬停时不会显示选项。
+ */
+.dropdown-container.disabled:hover .dropdown-options {
+    visibility: hidden;
+    opacity: 0;
+}
+
+/*
+ * 为下拉菜单触发器添加向下的小箭头图标。
+ */
+.dropdown-trigger::after {
+    content: "";
+    display: inline-block;
+    width: 0;
+    height: 0;
+    margin-left: 8px;
+    vertical-align: middle;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #ffffff;
+}
+
+/*
+ * 确保下拉菜单选项中的文本不换行。
+ */
+.dropdown-option {
+    white-space: nowrap;
+}
+
+/*
+ * 控制台内功能组之间的垂直分割线。
+ */
+.console-separator {
+    width: 1px;
+    align-self: stretch;
+    background-color: #555555;
+    margin: 0;
+}
+
+/* --- 查看器 --- */
+/*
+ * 查看器面板的容器样式。
+ * 它是一个悬浮在画布右上角的圆角面板。
+ */
+#inspector-html {
+    position: absolute;
+    top: 80px;
+    right: 20px;
+    width: 300px;
+    max-height: calc(100vh - 100px); /* 80px from top, 20px from bottom */
+    background-color: #f0f0f0;
+    border: 1px solid #cccccc;
+    border-radius: 6px;
+    z-index: 5;
+    padding: 20px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+/*
+ * 查看器内的标题样式。
+ */
+#inspector-html h3 {
+    margin-top: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #cccccc;
+}
+
+/*
+ * 查看器内信息块的通用边距。
+ */
+#inspector-html .info-block {
+    margin-bottom: 20px;
+}
+
+/*
+ * 查看器内信息块中的段落文本样式。
+ */
+#inspector-html .info-block p {
+    margin: 5px 0;
+    font-size: 14px;
+    color: #333333;
+    word-wrap: break-word;
+}
