@@ -455,6 +455,7 @@ class CanvasView {
     /**
      * 缩放画布和所有元素。
      * @param {number} factor - 缩放因子。
+     * @returns {boolean} 操作是否成功执行。
      */
     zoom(factor) {
         const oldZoom = View.viewState.zoom;
@@ -466,7 +467,7 @@ class CanvasView {
             )
         );
 
-        if (Math.abs(newZoom - oldZoom) < 1e-9) return;
+        if (Math.abs(newZoom - oldZoom) < 1e-9) return false;
 
         const rect = this.#canvasHTML.getBoundingClientRect();
         const center = { x: rect.width / 2, y: rect.height / 2 };
@@ -479,6 +480,7 @@ class CanvasView {
         View.viewState.viewOffset.x = center.x - worldPos.x * newZoom;
         View.viewState.viewOffset.y = center.y - worldPos.y * newZoom;
         View.viewState.zoom = newZoom;
+        return true;
     }
 
     /**

@@ -29,6 +29,29 @@ class ConsoleView {
     }
 
     /**
+     * 使指定的按钮闪烁，以提供键盘快捷键的视觉反馈。
+     * @param {string} key - 按钮的 `data-key` 属性值。
+     */
+    flashButton(key) {
+        const button = this.#consoleHTML?.querySelector(`[data-key="${key}"]`);
+        if (!button) return;
+
+        // 通过移除并重新添加类来重启动画，以应对快速连续的快捷键操作
+        button.classList.remove("flash");
+        void button.offsetWidth; // 强制浏览器重绘以确保动画重启
+        button.classList.add("flash");
+
+        // 使用 'animationend' 事件监听器在动画结束后自动清理 class
+        button.addEventListener(
+            "animationend",
+            () => {
+                button.classList.remove("flash");
+            },
+            { once: true }
+        );
+    }
+
+    /**
      * 构建并更新顶部的控制台UI。
      */
     update() {
@@ -76,46 +99,61 @@ class ConsoleView {
         );
 
         const zoomOutButton = this.#createButton("－", commands.zoomOut, {
+            key: "zoom-out",
             title: `Zoom Out (${MOD_KEY_PRIMARY}-)`,
         });
         const zoomInButton = this.#createButton("＋", commands.zoomIn, {
+            key: "zoom-in",
             title: `Zoom In (${MOD_KEY_PRIMARY}+)`,
         });
 
         const undoButton = this.#createButton("Undo", commands.undo, {
+            key: "undo",
             title: `Undo (${MOD_KEY_PRIMARY}Z)`,
             disabled:
+                View.viewState.dragging.isLocked ||
                 !historyManager.canUndo() ||
                 View.viewState.currentMode !== "edit",
         });
         const redoButton = this.#createButton("Redo", commands.redo, {
+            key: "redo",
             title: `Redo (${MOD_KEY_PRIMARY}${MOD_KEY_SHIFT}Z)`,
             disabled:
+                View.viewState.dragging.isLocked ||
                 !historyManager.canRedo() ||
                 View.viewState.currentMode !== "edit",
         });
 
-        const invertButton = this.#createButton("Invert", commands.invertSelection, {
-            disabled:
-                View.viewState.currentMode !== "edit" ||
-                !View.viewState.selectedElements.some(
-                    (sel) => sel.type === "node"
-                ),
-        });
+        const invertButton = this.#createButton(
+            "Invert",
+            commands.invertSelection,
+            {
+                disabled:
+                    View.viewState.dragging.isLocked ||
+                    View.viewState.currentMode !== "edit" ||
+                    !View.viewState.selectedElements.some(
+                        (sel) => sel.type === "node"
+                    ),
+            }
+        );
 
         const deleteButton = this.#createButton(
             "Delete",
             commands.deleteSelectedElements,
             {
+                key: "delete",
                 title: "Delete (⌫)",
                 disabled:
+                    View.viewState.dragging.isLocked ||
                     View.viewState.currentMode !== "edit" ||
                     View.viewState.selectedElements.length === 0,
             }
         );
         const clearButton = this.#createButton("Clear", commands.clearCanvas, {
             className: "clear",
-            disabled: View.viewState.currentMode !== "edit",
+            disabled:
+                View.viewState.dragging.isLocked ||
+                View.viewState.currentMode !== "edit",
         });
 
         const algoSwitcher = this.#createDropdown(
@@ -169,17 +207,19 @@ class ConsoleView {
      * @param {string} [options.className=''] - 按钮的CSS类名。
      * @param {string} [options.title=''] - 按钮的提示文本。
      * @param {boolean} [options.disabled=false] - 按钮是否禁用。
+     * @param {string} [options.key=''] - 用于快捷键反馈的唯一标识。
      * @returns {HTMLButtonElement}
      */
     #createButton(
         text,
         onClick,
-        { className = "", title = "", disabled = false } = {}
+        { className = "", title = "", disabled = false, key = "" } = {}
     ) {
         const button = document.createElement("button");
         button.className = `console-button ${className}`;
         button.textContent = text;
         if (title) button.title = title;
+        if (key) button.dataset.key = key;
         button.onclick = onClick;
         if (disabled) button.classList.add("disabled");
         return button;

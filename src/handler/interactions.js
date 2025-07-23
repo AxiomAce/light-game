@@ -111,10 +111,12 @@ export const editModeHandler = {
         View.viewState.dragging = {
             isActive: true,
             isIntentional: false,
+            isLocked: false,
             startPos: pos,
             currentPos: pos,
             fromNode: null,
             newlyCreatedElements: { nodes: [], edges: [] },
+            provisionalCommand: null,
         };
 
         if (View.viewState.ghostNodePos) {
@@ -126,6 +128,12 @@ export const editModeHandler = {
             );
             View.viewState.dragging.fromNode = newNode;
             View.viewState.dragging.newlyCreatedElements.nodes.push(newNode);
+
+            // 立即注册一个临时的“创建节点”命令，以便“撤销”按钮能立刻更新
+            const command = new AddElementsCommand({ nodes: [newNode], edges: [] });
+            historyManager.register(command);
+            View.viewState.dragging.provisionalCommand = command;
+
             if (!isMultiSelect) {
                 View.viewState.selectedElements = [
                     { type: "node", id: newNode.id },
@@ -148,6 +156,7 @@ export const editModeHandler = {
         } else {
             // 从空白区域开始拖拽以进行框选
             View.viewState.dragging.type = "box";
+            View.viewState.dragging.isLocked = true;
 
             // 2. 如果不是多选，立即清除现有选择
             if (!isMultiSelect) {
@@ -176,6 +185,9 @@ export const editModeHandler = {
                 ) >= View.DRAG_THRESHOLD
             ) {
                 View.viewState.dragging.isIntentional = true;
+                if (View.viewState.dragging.type !== "pan") {
+                    View.viewState.dragging.isLocked = true;
+                }
             }
 
             if (View.viewState.dragging.type === "edge") {
@@ -239,11 +251,19 @@ export const editModeHandler = {
             newlyCreatedElements,
             startPos,
             currentPos,
+            provisionalCommand,
         } = View.viewState.dragging;
 
         if (isIntentional) {
             // --- End of a DRAG operation ---
             if (type === "edge") {
+                if (provisionalCommand) {
+                    // 由于拖拽产生了更复杂的操作（如创建了边），
+                    // 我们需要先撤销临时的“仅创建节点”命令，
+                    // 稍后会注册一个包含所有变化的完整命令。
+                    historyManager.popUndoWithoutRedo();
+                }
+
                 let toNode = null;
                 if (
                     View.viewState.hoveredElement &&
@@ -275,6 +295,7 @@ export const editModeHandler = {
                     newlyCreatedElements.nodes.length > 0 ||
                     newlyCreatedElements.edges.length > 0
                 ) {
+                    // 注册一个包含本次拖拽所有创建元素的完整命令
                     historyManager.register(
                         new AddElementsCommand(newlyCreatedElements)
                     );
@@ -303,14 +324,9 @@ export const editModeHandler = {
         } else {
             // --- End of a CLICK operation ---
             const isMultiSelect = e.metaKey || e.ctrlKey;
-
-            if (
-                newlyCreatedElements.nodes.length > 0 &&
-                newlyCreatedElements.edges.length === 0
-            ) {
-                historyManager.register(
-                    new AddElementsCommand(newlyCreatedElements)
-                );
+            if (provisionalCommand) {
+                // 如果是创建单个节点的点击操作，临时命令即为最终命令，
+                // 因为它已经在 handleMouseDown 中注册，此处无需任何操作。
             } else {
                 const clickedElementInfo = canvasView.getElementAtPos(startPos);
 
@@ -348,9 +364,11 @@ export const editModeHandler = {
             }
         }
 
+        View.viewState.dragging.provisionalCommand = null;
         View.viewState.hoveredElement = null;
         View.viewState.ghostNodePos = null;
         View.viewState.boxSelectionHovered = [];
+        View.viewState.dragging.isLocked = false;
     },
 
     /**

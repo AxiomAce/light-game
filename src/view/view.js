@@ -60,12 +60,14 @@ const state = {
     dragging: {
         isActive: false, // 是否正在进行拖拽操作
         isIntentional: false, // 拖拽距离是否已超过阈值
+        isLocked: false, // 拖拽操作是否锁定UI
         type: null, // 拖拽类型: 'edge', 'box', 或 'pan'
         startPos: null, // 拖拽起始的世界坐标
         currentPos: null, // 拖拽当前的事件坐标
         fromNode: null, // 创建边时的起始节点 (类型: Node | null)
         newlyCreatedElements: { nodes: [], edges: [] }, // 本次拖拽中新创建的元素
         startViewOffset: { x: 0, y: 0 }, // 开始平移时的初始画布偏移
+        provisionalCommand: null, // 本次拖拽中临时的、可替换的命令
     },
 };
 

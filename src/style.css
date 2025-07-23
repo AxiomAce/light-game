@@ -73,6 +73,22 @@ body {
 }
 
 /*
+ * 控制台按钮的闪烁动画。
+ */
+@keyframes button-flash {
+    30% {
+        background-color: #007bff;
+    }
+}
+
+/*
+ * 控制台按钮的闪烁效果。
+ */
+.console-button.flash {
+    animation: button-flash 400ms ease-out;
+}
+
+/*
  * 清空按钮的特殊颜色。
  */
 .console-button.clear {

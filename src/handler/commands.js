@@ -52,16 +52,18 @@ export const commands = {
 
     /**
      * 放大画布。
+     * @returns {boolean} 操作是否成功执行。
      */
     zoomIn() {
-        canvasView.zoom(View.ZOOM_FACTOR);
+        return canvasView.zoom(View.ZOOM_FACTOR);
     },
 
     /**
      * 缩小画布。
+     * @returns {boolean} 操作是否成功执行。
      */
     zoomOut() {
-        canvasView.zoom(1 / View.ZOOM_FACTOR);
+        return canvasView.zoom(1 / View.ZOOM_FACTOR);
     },
 
     /**
@@ -83,12 +85,13 @@ export const commands = {
 
     /**
      * 删除所有选中的元素。
+     * @returns {boolean} - 操作是否成功执行。
      */
     deleteSelectedElements() {
         const selectedIds = new Set(
             View.viewState.selectedElements.map((sel) => sel.id)
         );
-        if (selectedIds.size === 0) return;
+        if (selectedIds.size === 0) return false;
 
         // 找到所有将被删除的节点，包括隐式删除的边。
         const selectedNodeIds = new Set(
@@ -118,6 +121,7 @@ export const commands = {
         const command = new DeleteElementsCommand(elementsToDelete);
         command.redo();
         historyManager.register(command);
+        return true;
     },
 
     /**
@@ -145,18 +149,20 @@ export const commands = {
 
     /**
      * 撤销上一步操作。
+     * @returns {boolean} - 操作是否成功执行。
      */
     undo() {
-        if (View.viewState.currentMode !== "edit") return;
-        historyManager.undo();
+        if (View.viewState.currentMode !== "edit") return false;
+        return historyManager.undo();
     },
 
     /**
      * 重做上一步操作。
+     * @returns {boolean} - 操作是否成功执行。
      */
     redo() {
-        if (View.viewState.currentMode !== "edit") return;
-        historyManager.redo();
+        if (View.viewState.currentMode !== "edit") return false;
+        return historyManager.redo();
     },
 
     // --- Solver Actions ---

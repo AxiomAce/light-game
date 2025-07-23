@@ -93,28 +93,44 @@ document.addEventListener("DOMContentLoaded", () => {
                 case "=": // 无需Shift的 '+'
                 case "+":
                     e.preventDefault();
-                    commands.zoomIn();
+                    if (commands.zoomIn()) {
+                        consoleView.flashButton("zoom-in");
+                    }
                     break;
                 case "-":
                     e.preventDefault();
-                    commands.zoomOut();
+                    if (commands.zoomOut()) {
+                        consoleView.flashButton("zoom-out");
+                    }
                     break;
             }
         }
 
         if (View.viewState.currentMode === "edit") {
-            if (e.key === "Backspace" || e.key === "Delete") {
+            if (
+                (e.key === "Backspace" || e.key === "Delete") &&
+                !View.viewState.dragging.isLocked
+            ) {
                 e.preventDefault();
-                commands.deleteSelectedElements();
+                if (commands.deleteSelectedElements()) {
+                    consoleView.flashButton("delete");
+                }
             } else if (e.key === "Escape") {
                 commands.deselectAll();
-            } else if (e.metaKey || e.ctrlKey) {
-                if (e.key === "z") {
+            } else if (
+                (e.metaKey || e.ctrlKey) &&
+                !View.viewState.dragging.isLocked
+            ) {
+                if (e.code === "KeyZ") {
                     e.preventDefault();
                     if (e.shiftKey) {
-                        commands.redo();
+                        if (commands.redo()) {
+                            consoleView.flashButton("redo");
+                        }
                     } else {
-                        commands.undo();
+                        if (commands.undo()) {
+                            consoleView.flashButton("undo");
+                        }
                     }
                 }
             }

@@ -157,11 +157,51 @@ const state = {
     redoStack: [],
 };
 
+/**
+ * 检查一个值是否为“纯粹”的JavaScript对象。
+ * @param {*} value - 要检查的值。
+ * @returns {boolean}
+ */
+function isPlainObject(value) {
+    if (Object.prototype.toString.call(value) !== "[object Object]") {
+        return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === null || prototype.constructor === Object;
+}
+
 /*
  * 通过Proxy实现历史状态的响应式更新
  * 当历史状态发生变化时，自动更新控制台
  */
 const handler = {
+    get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver);
+
+        // 如果正在访问数组的修改方法，返回一个包装函数以触发UI更新
+        if (
+            Array.isArray(target) &&
+            typeof value === "function" &&
+            ["push", "pop", "shift", "unshift", "splice"].includes(property)
+        ) {
+            return function (...args) {
+                const result = value.apply(target, args);
+                consoleView.update(); // 自动更新UI
+                return result;
+            };
+        }
+
+        // 如果值是纯对象或数组，则递归地返回其代理版本
+        if (
+            value &&
+            typeof value === "object" &&
+            (Array.isArray(value) || isPlainObject(value))
+        ) {
+            return new Proxy(value, handler);
+        }
+
+        return value;
+    },
     set(target, property, value, receiver) {
         const success = Reflect.set(target, property, value, receiver);
         if (success) {
@@ -199,22 +239,37 @@ class HistoryManager {
 
     /**
      * 撤销上一步操作。
+     * @returns {boolean}
      */
     undo() {
-        if (historyState.undoStack.length === 0) return;
+        if (!this.canUndo() || viewState.currentMode !== "edit") return false;
+
         const command = historyState.undoStack.pop();
         command.undo();
         historyState.redoStack.push(command);
+
+        return true;
     }
 
     /**
      * 重做上一步被撤销的操作。
+     * @returns {boolean}
      */
     redo() {
-        if (historyState.redoStack.length === 0) return;
+        if (!this.canRedo()) return false;
         const command = historyState.redoStack.pop();
         command.redo();
         historyState.undoStack.push(command);
+        return true;
+    }
+
+    /**
+     * 弹出并返回最后一个撤销命令，但不将其放入重做栈。
+     * @returns {Command | undefined}
+     */
+    popUndoWithoutRedo() {
+        if (!this.canUndo()) return undefined;
+        return historyState.undoStack.pop();
     }
 
     /**
