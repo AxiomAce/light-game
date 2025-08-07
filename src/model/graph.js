@@ -3,6 +3,69 @@
  * @description 负责管理应用的核心数据（图结构）并提供操作API。
  */
 
+import consoleView from "../view/console.js";
+import inspectorView from "../view/inspector.js";
+
+// ===================================================================
+// =======================   Graph States   ==========================
+// ===================================================================
+
+/**
+ * 定义网格的类型枚举
+ * @readonly
+ * @enum {number}
+ */
+export const GridType = Object.freeze({
+    SQUARE: 0,
+    TRIANGULAR: 1,
+});
+
+const state = {
+    grid: GridType.SQUARE, // 0 for square, 1 for triangular
+};
+
+const handler = {
+    get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof value === "object" && value !== null) {
+            return new Proxy(value, handler);
+        }
+        return value;
+    },
+    set(target, property, value, receiver) {
+        const success = Reflect.set(target, property, value, receiver);
+        if (success) {
+            consoleView.update();
+            inspectorView.update();
+        }
+        return success;
+    },
+};
+
+export const graphState = new Proxy(state, handler);
+
+// ===================================================================
+// =======================   Node & Edge   ===========================
+// ===================================================================
+
+/**
+ * 节点的类型枚举。
+ * @readonly
+ * @enum {number}
+ * @property {number} SQUARE_VERTEX - 正方形网格的顶点。`gridX`, `gridY` 是其整数坐标。
+ * @property {number} SQUARE_CENTER - 正方形网格的中心。`gridX`, `gridY` 是其左下角顶点的整数坐标。
+ * @property {number} TRIANGLE_VERTEX - 三角形网格的顶点。`gridX`, `gridY` 是其在偏移坐标系（x=偏移的横、y=高）中的整数坐标。
+ * @property {number} TRIANGLE_UP_CENTER - 尖端朝上(▲)的三角形的中心。`gridX`, `gridY` 是其顶部尖端顶点的坐标。
+ * @property {number} TRIANGLE_DOWN_CENTER - 尖端朝下(▼)的三角形的中心。`gridX`, `gridY` 是其底部尖端顶点的坐标。
+ */
+export const NodeType = Object.freeze({
+    SQUARE_VERTEX: 0,
+    SQUARE_CENTER: 1,
+    TRIANGLE_VERTEX: 2,
+    TRIANGLE_UP_CENTER: 3,
+    TRIANGLE_DOWN_CENTER: 4,
+});
+
 /**
  * @class Node
  * @description 代表图中的一个节点（灯）。
@@ -10,24 +73,28 @@
 export class Node {
     /** @type {string} 节点的唯一标识符。 */
     id;
-    /** @type {number} 节点在画布上的x坐标。 */
-    x;
-    /** @type {number} 节点在画布上的y坐标。 */
-    y;
+    /** @type {number} 节点的抽象网格x坐标。 */
+    gridX;
+    /** @type {number} 节点的抽象网格y坐标。 */
+    gridY;
+    /** @type {NodeType} 节点类型。 */
+    type;
     /** @type {boolean} 节点当前的游戏状态 (true: 亮, false: 灭)。 */
     on;
     /** @type {boolean} 节点在编辑模式下设定的初始状态 (true: 亮, false: 灭)。 */
     initialOn;
 
     /**
-     * @param {number} x - 节点的x坐标。
-     * @param {number} y - 节点的y坐标。
+     * @param {number} gridX - 节点的抽象网格x坐标。
+     * @param {number} gridY - 节点的抽象网格y坐标。
+     * @param {NodeType} type - 节点类型。
      * @param {boolean} [initialOn=false] - 节点的初始状态。
      */
-    constructor(x, y, initialOn = false) {
+    constructor(gridX, gridY, type, initialOn = false) {
         this.id = `node_${Date.now()}_${Math.random()}`;
-        this.x = x;
-        this.y = y;
+        this.gridX = gridX;
+        this.gridY = gridY;
+        this.type = type;
         this.on = initialOn;
         this.initialOn = initialOn;
     }
@@ -70,6 +137,10 @@ export class Edge {
     }
 }
 
+// ===================================================================
+// =========================   Graph   ===============================
+// ===================================================================
+
 /**
  * @class Graph
  * @description 图数据模型，管理图的节点和边。
@@ -83,6 +154,14 @@ class Graph {
     constructor() {
         this.#nodes = [];
         this.#edges = [];
+    }
+
+    /**
+     * 检查图是否为空。
+     * @returns {boolean} 图是否为空。
+     */
+    isEmpty() {
+        return this.#nodes.length === 0 && this.#edges.length === 0;
     }
 
     /**
@@ -117,23 +196,29 @@ class Graph {
     }
 
     /**
-     * 检查指定坐标处是否存在节点。
-     * @param {{x: number, y: number}} pos - 要检查的坐标。
+     * 检查指定抽象坐标处是否存在节点。
+     * @param {{gridX: number, gridY: number, type: NodeType}} gridPos - 要检查的坐标。
      * @returns {boolean}
      */
-    hasNodeAt(pos) {
-        return this.#nodes.some((n) => n.x === pos.x && n.y === pos.y);
+    hasNodeAtGridPos(gridPos) {
+        return this.#nodes.some(
+            (n) =>
+                n.gridX === gridPos.gridX &&
+                n.gridY === gridPos.gridY &&
+                n.type === gridPos.type
+        );
     }
 
     /**
      * 向图中添加一个新节点。
-     * @param {number} x - 节点的x坐标。
-     * @param {number} y - 节点的y坐标。
+     * @param {number} gridX - 节点的抽象网格x坐标。
+     * @param {number} gridY - 节点的抽象网格y坐标。
+     * @param {NodeType} type - 节点类型。
      * @param {boolean} [initialOn=false] - 节点的初始状态。
      * @returns {Node} 新创建的节点对象。
      */
-    addNode(x, y, initialOn = false) {
-        const newNode = new Node(x, y, initialOn);
+    addNode(gridX, gridY, type, initialOn = false) {
+        const newNode = new Node(gridX, gridY, type, initialOn);
         this.#nodes.push(newNode);
         return newNode;
     }

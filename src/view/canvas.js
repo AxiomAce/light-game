@@ -4,8 +4,15 @@
  * 绘制策略：在界面主循环中不停循环调用draw()函数。
  */
 
-import graph from "../model/graph.js";
+import graph, { NodeType, graphState, GridType } from "../model/graph.js";
 import * as View from "./view.js";
+import {
+    DraggingType,
+    ModeType,
+    canZoomIn,
+    canZoomOut,
+    getZoomRatio,
+} from "./view.js";
 import { solverState } from "../model/solver.js";
 
 /**
@@ -18,15 +25,18 @@ import { solverState } from "../model/solver.js";
  * @description 负责管理Canvas 2D上下文，并提供绘图API。
  */
 class CanvasView {
+    /** @type {CanvasRenderingContext2D} 2D上下文 */
     #ctx;
+    /** @type {HTMLCanvasElement} 画布的DOM元素 */
     #canvasHTML;
 
     /**
      * 初始化Canvas模块。
-     * @param {HTMLCanvasElement} _canvasHTML - 画布DOM元素。
      */
-    init(_canvasHTML) {
-        this.#canvasHTML = _canvasHTML;
+    init() {
+        this.#canvasHTML = /** @type {HTMLCanvasElement} */ (
+            document.getElementById("canvas-html")
+        );
         this.#ctx = this.#canvasHTML.getContext("2d");
         this.#setupCanvas();
     }
@@ -78,7 +88,7 @@ class CanvasView {
             View.viewState.viewOffset.x,
             View.viewState.viewOffset.y
         );
-        this.#ctx.scale(View.viewState.zoom, View.viewState.zoom);
+        this.#ctx.scale(getZoomRatio(), getZoomRatio());
 
         this.#drawBackground(rect);
         this.#drawHoverHighlight();
@@ -98,97 +108,182 @@ class CanvasView {
      * @param {DOMRect} rect - 画布的边界矩形。
      */
     #drawBackground(rect) {
-        this.#ctx.strokeStyle = View.COLOR_GRID_PRIMARY;
-        this.#setLineWidth(View.LINE_WIDTH_GRID_PRIMARY);
         const S = View.INITIAL_GRID_SPACING;
 
-        const viewXStart = -View.viewState.viewOffset.x / View.viewState.zoom;
-        const viewYStart = -View.viewState.viewOffset.y / View.viewState.zoom;
-        const viewXEnd = viewXStart + rect.width / View.viewState.zoom;
-        const viewYEnd = viewYStart + rect.height / View.viewState.zoom;
+        // 计算当前视口的世界坐标范围
+        const viewXStart = -View.viewState.viewOffset.x / getZoomRatio();
+        const viewYStart = -View.viewState.viewOffset.y / getZoomRatio();
+        const viewXEnd = viewXStart + rect.width / getZoomRatio();
+        const viewYEnd = viewYStart + rect.height / getZoomRatio();
 
-        const gridXStart = Math.floor(viewXStart / S) * S;
-        const gridYStart = Math.floor(viewYStart / S) * S;
+        if (graphState.grid === GridType.SQUARE) {
+            // --- 绘制正方形网格 ---
+            // 计算可见区域需要绘制的网格线范围，并增加一些余量以确保完全覆盖
+            const gridX_min = Math.floor(viewXStart / S) - 1;
+            const gridX_max = Math.ceil(viewXEnd / S) + 1;
+            const gridY_min = Math.floor(viewYStart / S) - 1;
+            const gridY_max = Math.ceil(viewYEnd / S) + 1;
 
-        if (View.viewState.canvasLayout === "square") {
+            // 绘制主网格线 (垂直和水平)
+            this.#ctx.strokeStyle = View.COLOR_GRID_PRIMARY;
             this.#setLineWidth(View.LINE_WIDTH_GRID_PRIMARY);
-            for (let x = gridXStart; x < viewXEnd; x += S) {
-                this.#ctx.beginPath();
-                this.#ctx.moveTo(x, viewYStart);
-                this.#ctx.lineTo(x, viewYEnd);
-                this.#ctx.stroke();
+            this.#ctx.beginPath();
+
+            // 绘制所有可见的垂直线
+            for (let gridX = gridX_min; gridX <= gridX_max; gridX++) {
+                const p = gridToPixel(
+                    {
+                        gridX: gridX,
+                        gridY: 0,
+                        type: NodeType.SQUARE_VERTEX,
+                    },
+                    GridType.SQUARE
+                );
+                this.#ctx.moveTo(p.x, viewYStart);
+                this.#ctx.lineTo(p.x, viewYEnd);
             }
-            for (let y = gridYStart; y < viewYEnd; y += S) {
-                this.#ctx.beginPath();
-                this.#ctx.moveTo(viewXStart, y);
-                this.#ctx.lineTo(viewXEnd, y);
-                this.#ctx.stroke();
+            // 绘制所有可见的水平线
+            for (let gridY = gridY_min; gridY <= gridY_max; gridY++) {
+                const p = gridToPixel(
+                    {
+                        gridX: 0,
+                        gridY: gridY,
+                        type: NodeType.SQUARE_VERTEX,
+                    },
+                    GridType.SQUARE
+                );
+                this.#ctx.moveTo(viewXStart, p.y);
+                this.#ctx.lineTo(viewXEnd, p.y);
             }
+            this.#ctx.stroke();
+
+            // 绘制次要网格线 (对角线)
             this.#ctx.strokeStyle = View.COLOR_GRID_SECONDARY;
             this.#setLineWidth(View.LINE_WIDTH_GRID_SECONDARY);
+            this.#ctx.beginPath();
 
-            for (let y = gridYStart; y < viewYEnd; y += S) {
-                for (let x = gridXStart; x < viewXEnd; x += S) {
-                    this.#ctx.beginPath();
-                    this.#ctx.moveTo(x, y);
-                    this.#ctx.lineTo(x + S, y + S);
-                    this.#ctx.stroke();
-                    this.#ctx.beginPath();
-                    this.#ctx.moveTo(x + S, y);
-                    this.#ctx.lineTo(x, y + S);
-                    this.#ctx.stroke();
+            for (let gridY = gridY_min; gridY < gridY_max; gridY++) {
+                for (let gridX = gridX_min; gridX < gridX_max; gridX++) {
+                    const p_tl = gridToPixel(
+                        {
+                            gridX: gridX,
+                            gridY: gridY,
+                            type: NodeType.SQUARE_VERTEX,
+                        },
+                        GridType.SQUARE
+                    );
+                    const p_tr = { x: p_tl.x + S, y: p_tl.y };
+                    const p_bl = { x: p_tl.x, y: p_tl.y + S };
+                    const p_br = { x: p_tl.x + S, y: p_tl.y + S };
+
+                    // 绘制两条对角线
+                    this.#ctx.moveTo(p_tl.x, p_tl.y);
+                    this.#ctx.lineTo(p_br.x, p_br.y);
+                    this.#ctx.moveTo(p_tr.x, p_tr.y);
+                    this.#ctx.lineTo(p_bl.x, p_bl.y);
                 }
             }
-        } else if (View.viewState.canvasLayout === "triangular") {
-            const h = (S * Math.sqrt(3)) / 2;
-            const gridYStartTri = Math.floor(viewYStart / h) * h - h;
+            this.#ctx.stroke();
+        } else if (graphState.grid === GridType.TRIANGULAR) {
+            // --- 绘制三角形网格 ---
+            const h = (S * Math.sqrt(3)) / 2; // 等边三角形的高度
+            // 计算可见区域需要绘制的网格线范围，并增加一些余量以确保完全覆盖
+            const gridY_min = Math.floor(viewYStart / h) - 1;
+            const gridY_max = Math.ceil(viewYEnd / h) + 1;
+            const gridX_min = Math.floor(viewXStart / S) - 2;
+            const gridX_max = Math.ceil(viewXEnd / S) + 2;
 
-            for (let y = gridYStartTri; y < viewYEnd; y += h) {
-                const staggerOffset = (Math.round(y / h) % 2) * (S / 2);
-                const gridXStartTri =
-                    Math.floor((viewXStart - staggerOffset) / S) * S +
-                    staggerOffset -
-                    S;
+            // 绘制主网格线 (构成所有三角形的边)
+            this.#ctx.strokeStyle = View.COLOR_GRID_PRIMARY;
+            this.#setLineWidth(View.LINE_WIDTH_GRID_PRIMARY);
+            this.#ctx.beginPath();
 
-                for (let x = gridXStartTri; x < viewXEnd; x += S) {
-                    const top = { x: x + S / 2, y: y };
-                    const left = { x: x, y: y + h };
-                    const right = { x: x + S, y: y + h };
-                    const bottom = { x: x + S / 2, y: y + 2 * h };
+            for (let gridY = gridY_min; gridY < gridY_max; gridY++) {
+                for (let gridX = gridX_min; gridX < gridX_max; gridX++) {
+                    // 将每个逻辑顶点(gridX, gridY)视为一个朝上(▲)三角形的顶尖
+                    const p_tip = gridToPixel(
+                        {
+                            gridX: gridX,
+                            gridY: gridY,
+                            type: NodeType.TRIANGLE_VERTEX,
+                        },
+                        GridType.TRIANGULAR
+                    );
 
-                    this.#ctx.strokeStyle = View.COLOR_GRID_PRIMARY;
-                    this.#setLineWidth(View.LINE_WIDTH_GRID_PRIMARY);
-                    this.#ctx.beginPath();
-                    this.#ctx.moveTo(top.x, top.y);
-                    this.#ctx.lineTo(left.x, left.y);
-                    this.#ctx.moveTo(top.x, top.y);
-                    this.#ctx.lineTo(right.x, right.y);
-                    this.#ctx.moveTo(left.x, left.y);
-                    this.#ctx.lineTo(right.x, right.y);
-                    this.#ctx.stroke();
+                    // 从顶尖的几何位置推导出底部的两个顶点
+                    const p_base_L = { x: p_tip.x - S / 2, y: p_tip.y + h };
+                    const p_base_R = { x: p_tip.x + S / 2, y: p_tip.y + h };
 
-                    const centerDown = { x: top.x, y: y + (2 * h) / 3 };
-                    this.#setLineWidth(View.LINE_WIDTH_GRID_SECONDARY);
-                    this.#ctx.beginPath();
-                    this.#ctx.moveTo(top.x, top.y);
-                    this.#ctx.lineTo(centerDown.x, centerDown.y);
-                    this.#ctx.moveTo(left.x, left.y);
-                    this.#ctx.lineTo(centerDown.x, centerDown.y);
-                    this.#ctx.moveTo(right.x, right.y);
-                    this.#ctx.lineTo(centerDown.x, centerDown.y);
-                    this.#ctx.stroke();
-
-                    const centerUp = { x: bottom.x, y: y + h + h / 3 };
-                    this.#ctx.beginPath();
-                    this.#ctx.moveTo(left.x, left.y);
-                    this.#ctx.lineTo(centerUp.x, centerUp.y);
-                    this.#ctx.moveTo(right.x, right.y);
-                    this.#ctx.lineTo(centerUp.x, centerUp.y);
-                    this.#ctx.moveTo(bottom.x, bottom.y);
-                    this.#ctx.lineTo(centerUp.x, centerUp.y);
-                    this.#ctx.stroke();
+                    // 绘制这个朝上三角形的三个边
+                    this.#ctx.moveTo(p_tip.x, p_tip.y);
+                    this.#ctx.lineTo(p_base_L.x, p_base_L.y);
+                    this.#ctx.lineTo(p_base_R.x, p_base_R.y);
+                    this.#ctx.closePath();
                 }
             }
+            this.#ctx.stroke();
+
+            // 绘制次要网格线 (从三角形中心到其顶点)
+            this.#ctx.strokeStyle = View.COLOR_GRID_SECONDARY;
+            this.#setLineWidth(View.LINE_WIDTH_GRID_SECONDARY);
+            this.#ctx.beginPath();
+
+            // 遍历所有可见的网格单元，为每个朝上和朝下的三角形绘制中心连线
+            for (let gridY = gridY_min; gridY < gridY_max; gridY++) {
+                for (let gridX = gridX_min; gridX < gridX_max; gridX++) {
+                    // --- 1. 处理以 (gridX, gridY) 为顶尖的朝上(▲)三角形 ---
+                    const p_tip = gridToPixel(
+                        {
+                            gridX: gridX,
+                            gridY: gridY,
+                            type: NodeType.TRIANGLE_VERTEX,
+                        },
+                        GridType.TRIANGULAR
+                    );
+                    const p_base_L = { x: p_tip.x - S / 2, y: p_tip.y + h };
+                    const p_base_R = { x: p_tip.x + S / 2, y: p_tip.y + h };
+                    // ▲ 三角形的重心在顶尖下方 2/3 高度处
+                    const p_center_up = {
+                        x: p_tip.x,
+                        y: p_tip.y + (2 * h) / 3,
+                    };
+
+                    // 绘制从中心到三个顶点的连线
+                    this.#ctx.moveTo(p_center_up.x, p_center_up.y);
+                    this.#ctx.lineTo(p_tip.x, p_tip.y);
+                    this.#ctx.moveTo(p_center_up.x, p_center_up.y);
+                    this.#ctx.lineTo(p_base_L.x, p_base_L.y);
+                    this.#ctx.moveTo(p_center_up.x, p_center_up.y);
+                    this.#ctx.lineTo(p_base_R.x, p_base_R.y);
+
+                    // --- 2. 处理与上述▲三角形相邻的朝下(▼)三角形 ---
+                    // 这个▼三角形由两个相邻的顶尖和它们共享的底边顶点构成
+                    const v1 = p_tip;
+                    const v2 = gridToPixel(
+                        {
+                            gridX: gridX + 1,
+                            gridY: gridY,
+                            type: NodeType.TRIANGLE_VERTEX,
+                        },
+                        GridType.TRIANGULAR
+                    );
+                    const v3 = p_base_R; // (p_tip.x + S/2, p_tip.y + h)
+                    // ▼ 三角形的重心在其几何中心
+                    const p_center_down = {
+                        x: p_tip.x + S / 2,
+                        y: p_tip.y + h / 3,
+                    };
+
+                    // 绘制从中心到三个顶点的连线
+                    this.#ctx.moveTo(p_center_down.x, p_center_down.y);
+                    this.#ctx.lineTo(v1.x, v1.y);
+                    this.#ctx.moveTo(p_center_down.x, p_center_down.y);
+                    this.#ctx.lineTo(v2.x, v2.y);
+                    this.#ctx.moveTo(p_center_down.x, p_center_down.y);
+                    this.#ctx.lineTo(v3.x, v3.y);
+                }
+            }
+            this.#ctx.stroke();
         }
     }
 
@@ -197,16 +292,17 @@ class CanvasView {
      */
     #drawNodes() {
         graph.getGraph().nodes.forEach((node) => {
+            const pos = gridToPixel(node, graphState.grid);
             this.#ctx.beginPath();
             this.#ctx.arc(
-                node.x,
-                node.y,
+                pos.x,
+                pos.y,
                 View.INITIAL_NODE_RADIUS,
                 0,
                 Math.PI * 2
             );
             this.#ctx.fillStyle = (
-                View.viewState.currentMode === "solver"
+                View.viewState.currentMode === ModeType.SOLVER
                     ? node.on
                     : node.initialOn
             )
@@ -227,9 +323,13 @@ class CanvasView {
             const fromNode = graph.findNodeById(edge.source);
             const toNode = graph.findNodeById(edge.target);
             if (!fromNode || !toNode) return;
+
+            const fromPos = gridToPixel(fromNode, graphState.grid);
+            const toPos = gridToPixel(toNode, graphState.grid);
+
             this.#ctx.beginPath();
-            this.#ctx.moveTo(fromNode.x, fromNode.y);
-            this.#ctx.lineTo(toNode.x, toNode.y);
+            this.#ctx.moveTo(fromPos.x, fromPos.y);
+            this.#ctx.lineTo(toPos.x, toPos.y);
             this.#ctx.strokeStyle = View.COLOR_STROKE_DEFAULT;
             this.#setLineWidth(View.LINE_WIDTH_DEFAULT);
             this.#ctx.stroke();
@@ -240,31 +340,59 @@ class CanvasView {
      * 绘制鼠标悬停在元素上时的高亮效果。
      */
     #drawHoverHighlight() {
-        if (View.viewState.currentMode !== "edit") return;
+        if (View.viewState.currentMode !== ModeType.EDIT) return;
 
-        const elementsToHighlight = [];
-        if (View.viewState.hoveredElement) {
-            elementsToHighlight.push(View.viewState.hoveredElement);
+        // --- 获取需要高亮的元素 ---
+        let elementsToHighlight = [];
+        if (View.viewState.dragging.type === DraggingType.BOX_DRAG) {
+            // 框选时的高亮
+            const { startPos } = View.viewState.dragging;
+            const endPos = View.viewState.mousePos;
+            const rect = {
+                x1: Math.min(startPos.x, endPos.x),
+                y1: Math.min(startPos.y, endPos.y),
+                x2: Math.max(startPos.x, endPos.x),
+                y2: Math.max(startPos.y, endPos.y),
+            };
+            elementsToHighlight = this.getElementsInBox(rect);
+        } else if (
+            View.viewState.dragging.type === DraggingType.NULL ||
+            View.viewState.dragging.type === DraggingType.PRESSED ||
+            View.viewState.dragging.type === DraggingType.EDGE_DRAG
+        ) {
+            // 空闲或拖拽创建边时的高亮
+            const hoveredElement = this.getElementAtPos(
+                View.viewState.mousePos
+            );
+            if (hoveredElement) {
+                // 不高亮选中的节点（因为选中时会高亮）
+                if (
+                    View.viewState.selectedElements.some(
+                        (s) => s.id === hoveredElement.element.id
+                    )
+                ) {
+                    // DO NOTHING
+                } else {
+                    elementsToHighlight.push({
+                        type: hoveredElement.type,
+                        id: hoveredElement.element.id,
+                    });
+                }
+            }
         }
 
-        const ids = new Set(elementsToHighlight.map((e) => e.id));
-        (View.viewState.boxSelectionHovered || []).forEach((sel) => {
-            if (!ids.has(sel.id)) {
-                elementsToHighlight.push(sel);
-                ids.add(sel.id);
-            }
-        });
-
+        // --- 绘制高亮效果 ---
         elementsToHighlight.forEach((el) => {
             if (el.type === "node") {
                 const node = graph.findNodeById(el.id);
                 if (node) {
+                    const pos = gridToPixel(node, graphState.grid);
                     this.#ctx.beginPath();
                     this.#ctx.arc(
-                        node.x,
-                        node.y,
+                        pos.x,
+                        pos.y,
                         View.INITIAL_NODE_RADIUS +
-                            View.HIGHLIGHT_PADDING / View.viewState.zoom,
+                            View.HIGHLIGHT_PADDING / getZoomRatio(),
                         0,
                         Math.PI * 2
                     );
@@ -272,17 +400,27 @@ class CanvasView {
                     this.#ctx.fill();
                 }
             } else if (el.type === "edge") {
-                const edge = graph.getGraph().edges.find((e) => e.id === el.id);
-                if (edge) {
-                    const fromNode = graph.findNodeById(edge.source);
-                    const toNode = graph.findNodeById(edge.target);
-                    if (!fromNode || !toNode) return;
-                    this.#ctx.beginPath();
-                    this.#ctx.moveTo(fromNode.x, fromNode.y);
-                    this.#ctx.lineTo(toNode.x, toNode.y);
-                    this.#ctx.strokeStyle = View.COLOR_HOVER;
-                    this.#setLineWidth(View.LINE_WIDTH_HIGHLIGHT);
-                    this.#ctx.stroke();
+                // Creating an edge does not highlight hovered edges.
+                if (
+                    View.viewState.dragging.type !== DraggingType.PRESSED &&
+                    View.viewState.dragging.type !== DraggingType.EDGE_DRAG
+                ) {
+                    const edge = graph
+                        .getGraph()
+                        .edges.find((e) => e.id === el.id);
+                    if (edge) {
+                        const fromNode = graph.findNodeById(edge.source);
+                        const toNode = graph.findNodeById(edge.target);
+                        if (!fromNode || !toNode) return;
+                        const fromPos = gridToPixel(fromNode, graphState.grid);
+                        const toPos = gridToPixel(toNode, graphState.grid);
+                        this.#ctx.beginPath();
+                        this.#ctx.moveTo(fromPos.x, fromPos.y);
+                        this.#ctx.lineTo(toPos.x, toPos.y);
+                        this.#ctx.strokeStyle = View.COLOR_HOVER;
+                        this.#setLineWidth(View.LINE_WIDTH_HIGHLIGHT);
+                        this.#ctx.stroke();
+                    }
                 }
             }
         });
@@ -296,12 +434,13 @@ class CanvasView {
             if (sel.type === "node") {
                 const node = graph.findNodeById(sel.id);
                 if (node) {
+                    const pos = gridToPixel(node, graphState.grid);
                     this.#ctx.beginPath();
                     this.#ctx.arc(
-                        node.x,
-                        node.y,
+                        pos.x,
+                        pos.y,
                         View.INITIAL_NODE_RADIUS +
-                            View.HIGHLIGHT_PADDING / View.viewState.zoom,
+                            View.HIGHLIGHT_PADDING / getZoomRatio(),
                         0,
                         Math.PI * 2
                     );
@@ -316,9 +455,11 @@ class CanvasView {
                     const fromNode = graph.findNodeById(edge.source);
                     const toNode = graph.findNodeById(edge.target);
                     if (!fromNode || !toNode) return;
+                    const fromPos = gridToPixel(fromNode, graphState.grid);
+                    const toPos = gridToPixel(toNode, graphState.grid);
                     this.#ctx.beginPath();
-                    this.#ctx.moveTo(fromNode.x, fromNode.y);
-                    this.#ctx.lineTo(toNode.x, toNode.y);
+                    this.#ctx.moveTo(fromPos.x, fromPos.y);
+                    this.#ctx.lineTo(toPos.x, toPos.y);
                     this.#ctx.strokeStyle = View.COLOR_SELECTION;
                     this.#setLineWidth(View.LINE_WIDTH_HIGHLIGHT);
                     this.#ctx.stroke();
@@ -331,14 +472,27 @@ class CanvasView {
      * 绘制用于预览新节点创建的“幽灵节点”。
      */
     #drawGhostNode() {
+        if (View.viewState.currentMode !== ModeType.EDIT) return;
+
+        // 幽灵节点只在非拖拽或拖拽创建边时显示
+        const { type } = View.viewState.dragging;
         if (
-            View.viewState.ghostNodePos &&
-            View.viewState.currentMode === "edit"
+            type !== DraggingType.NULL &&
+            type !== DraggingType.PRESSED &&
+            type !== DraggingType.EDGE_DRAG
         ) {
+            return;
+        }
+
+        const ghostNodePos = this.calculateGhostNodePos(
+            View.viewState.mousePos
+        );
+        if (ghostNodePos) {
+            const pos = gridToPixel(ghostNodePos, graphState.grid);
             this.#ctx.beginPath();
             this.#ctx.arc(
-                View.viewState.ghostNodePos.x,
-                View.viewState.ghostNodePos.y,
+                pos.x,
+                pos.y,
                 View.INITIAL_NODE_RADIUS,
                 0,
                 Math.PI * 2
@@ -353,31 +507,26 @@ class CanvasView {
      * 绘制从节点拖拽出以创建边的引导线。
      */
     #drawDragLine() {
-        if (
-            View.viewState.dragging.isActive &&
-            View.viewState.dragging.isIntentional &&
-            View.viewState.dragging.type === "edge" &&
-            View.viewState.dragging.currentPos
-        ) {
-            let startPos = View.viewState.dragging.startPos;
+        if (View.viewState.dragging.type === DraggingType.EDGE_DRAG) {
+            let startPos;
             if (View.viewState.dragging.fromNode) {
-                startPos = {
-                    x: View.viewState.dragging.fromNode.x,
-                    y: View.viewState.dragging.fromNode.y,
-                };
+                startPos = gridToPixel(
+                    View.viewState.dragging.fromNode,
+                    graphState.grid
+                );
+            } else {
+                startPos = View.viewState.dragging.startPos;
             }
 
-            let endPos = View.viewState.dragging.currentPos;
-            if (
-                View.viewState.hoveredElement &&
-                View.viewState.hoveredElement.type === "node"
-            ) {
-                const node = graph.findNodeById(
-                    View.viewState.hoveredElement.id
-                );
-                if (node) endPos = { x: node.x, y: node.y };
-            } else if (View.viewState.ghostNodePos) {
-                endPos = View.viewState.ghostNodePos;
+            let endPos = View.viewState.mousePos;
+            const hoveredElement = this.getElementAtPos(endPos);
+            const ghostNodePos = this.calculateGhostNodePos(endPos);
+
+            if (hoveredElement && hoveredElement.type === "node") {
+                const node = graph.findNodeById(hoveredElement.element.id);
+                if (node) endPos = gridToPixel(node, graphState.grid);
+            } else if (ghostNodePos) {
+                endPos = gridToPixel(ghostNodePos, graphState.grid);
             }
 
             this.#ctx.beginPath();
@@ -393,20 +542,16 @@ class CanvasView {
      * 绘制框选时的矩形选框。
      */
     #drawSelectionBox() {
-        if (
-            View.viewState.dragging.isActive &&
-            View.viewState.dragging.type === "box" &&
-            View.viewState.dragging.isIntentional &&
-            View.viewState.dragging.currentPos
-        ) {
-            const { startPos, currentPos } = View.viewState.dragging;
+        if (View.viewState.dragging.type === DraggingType.BOX_DRAG) {
+            const { startPos } = View.viewState.dragging;
+            const endPos = View.viewState.mousePos;
             this.#ctx.fillStyle = View.COLOR_SELECTION_BOX_FILL;
             this.#ctx.strokeStyle = View.COLOR_SELECTION_BOX_STROKE;
             this.#setLineWidth(View.LINE_WIDTH_SELECTION_BOX);
-            const rectX = Math.min(startPos.x, currentPos.x);
-            const rectY = Math.min(startPos.y, currentPos.y);
-            const rectW = Math.abs(startPos.x - currentPos.x);
-            const rectH = Math.abs(startPos.y - currentPos.y);
+            const rectX = Math.min(startPos.x, endPos.x);
+            const rectY = Math.min(startPos.y, endPos.y);
+            const rectW = Math.abs(startPos.x - endPos.x);
+            const rectH = Math.abs(startPos.y - endPos.y);
             this.#ctx.fillRect(rectX, rectY, rectW, rectH);
             this.#ctx.strokeRect(rectX, rectY, rectW, rectH);
         }
@@ -417,31 +562,31 @@ class CanvasView {
      */
     #drawSolutionHighlight() {
         if (
-            View.viewState.currentMode !== "solver" ||
+            View.viewState.currentMode !== ModeType.SOLVER ||
             !solverState.solution.hasSolution
         )
             return;
         solverState.solution.nodesToPress.forEach((nodeId) => {
             const node = graph.findNodeById(nodeId);
             if (node) {
+                const pos = gridToPixel(node, graphState.grid);
                 this.#ctx.beginPath();
                 this.#ctx.arc(
-                    node.x,
-                    node.y,
+                    pos.x,
+                    pos.y,
                     View.INITIAL_NODE_RADIUS +
-                        View.HIGHLIGHT_PADDING / View.viewState.zoom,
+                        View.LINE_WIDTH_HIGHLIGHT / getZoomRatio(),
                     0,
                     Math.PI * 2
                 );
-                this.#ctx.strokeStyle = View.COLOR_SOLUTION;
-                this.#setLineWidth(View.LINE_WIDTH_HIGHLIGHT);
-                this.#ctx.stroke();
+                this.#ctx.fillStyle = View.COLOR_SOLUTION;
+                this.#ctx.fill();
             }
         });
     }
 
     // ===================================================================
-    // ==========================   辅助函数   ============================
+    // ==========================   绘制辅助   ============================
     // ===================================================================
 
     /**
@@ -449,37 +594,38 @@ class CanvasView {
      * @param {number} width - 期望的视觉线宽（像素）。
      */
     #setLineWidth(width) {
-        this.#ctx.lineWidth = width / View.viewState.zoom;
+        this.#ctx.lineWidth = width / getZoomRatio();
     }
 
     /**
      * 缩放画布和所有元素。
-     * @param {number} factor - 缩放因子。
+     * @param {number} delta - 缩放等级变化量。
      * @returns {boolean} 操作是否成功执行。
      */
-    zoom(factor) {
-        const oldZoom = View.viewState.zoom;
-        const newZoom = Math.max(
-            View.MIN_GRID_SPACING / View.INITIAL_GRID_SPACING,
-            Math.min(
-                View.MAX_GRID_SPACING / View.INITIAL_GRID_SPACING,
-                oldZoom * factor
-            )
-        );
+    zoomLevelChange(delta) {
+        const oldZoomRatio = getZoomRatio();
 
-        if (Math.abs(newZoom - oldZoom) < 1e-9) return false;
+        // TODO
+        if (!canZoomIn() && delta > 0) return false;
+        if (!canZoomOut() && delta < 0) return false;
+
+        let newZoomLevel = View.viewState.zoomLevel + delta;
+        newZoomLevel = Math.max(View.MIN_ZOOM_LEVEL, newZoomLevel);
+        newZoomLevel = Math.min(View.MAX_ZOOM_LEVEL, newZoomLevel);
+        View.viewState.zoomLevel = newZoomLevel;
+
+        const newZoomRatio = getZoomRatio();
 
         const rect = this.#canvasHTML.getBoundingClientRect();
         const center = { x: rect.width / 2, y: rect.height / 2 };
 
         const worldPos = {
-            x: (center.x - View.viewState.viewOffset.x) / oldZoom,
-            y: (center.y - View.viewState.viewOffset.y) / oldZoom,
+            x: (center.x - View.viewState.viewOffset.x) / oldZoomRatio,
+            y: (center.y - View.viewState.viewOffset.y) / oldZoomRatio,
         };
 
-        View.viewState.viewOffset.x = center.x - worldPos.x * newZoom;
-        View.viewState.viewOffset.y = center.y - worldPos.y * newZoom;
-        View.viewState.zoom = newZoom;
+        View.viewState.viewOffset.x = center.x - worldPos.x * newZoomRatio;
+        View.viewState.viewOffset.y = center.y - worldPos.y * newZoomRatio;
         return true;
     }
 
@@ -489,25 +635,6 @@ class CanvasView {
     resetView() {
         View.viewState.selectedElements = [];
         View.viewState.viewOffset = { x: 0, y: 0 };
-        View.viewState.hoveredElement = null;
-        View.viewState.ghostNodePos = null;
-    }
-
-    /**
-     * 获取鼠标在画布“世界坐标”中的位置。
-     * @param {MouseEvent} event - 鼠标事件对象。
-     * @returns {{x: number, y: number}} 鼠标在画布内的“世界”坐标。
-     */
-    getMousePos(event) {
-        const rect = this.#canvasHTML.getBoundingClientRect();
-        return {
-            x:
-                (event.clientX - rect.left - View.viewState.viewOffset.x) /
-                View.viewState.zoom,
-            y:
-                (event.clientY - rect.top - View.viewState.viewOffset.y) /
-                View.viewState.zoom,
-        };
     }
 
     /**
@@ -520,8 +647,9 @@ class CanvasView {
         // 节点优先
         for (let i = nodes.length - 1; i >= 0; i--) {
             const node = nodes[i];
+            const nodePos = gridToPixel(node, graphState.grid);
             const dist = Math.sqrt(
-                (pos.x - node.x) ** 2 + (pos.y - node.y) ** 2
+                (pos.x - nodePos.x) ** 2 + (pos.y - nodePos.y) ** 2
             );
             if (dist <= View.INITIAL_NODE_RADIUS)
                 return { type: "node", element: node };
@@ -532,8 +660,10 @@ class CanvasView {
             const fromNode = graph.findNodeById(edge.source);
             const toNode = graph.findNodeById(edge.target);
             if (!fromNode || !toNode) continue;
-            const distSq = pointToSegmentDistSq(pos, fromNode, toNode);
-            if (distSq < (View.EDGE_CLICK_TOLERANCE / View.viewState.zoom) ** 2)
+            const fromPos = gridToPixel(fromNode, graphState.grid);
+            const toPos = gridToPixel(toNode, graphState.grid);
+            const distSq = pointToSegmentDistSq(pos, fromPos, toPos);
+            if (distSq < (View.EDGE_CLICK_TOLERANCE / getZoomRatio()) ** 2)
                 return { type: "edge", element: edge };
         }
         return null;
@@ -549,7 +679,14 @@ class CanvasView {
         const { nodes, edges } = graph.getGraph();
 
         nodes.forEach((node) => {
-            if (nodeIntersectsRect(node, View.INITIAL_NODE_RADIUS, rect)) {
+            const nodePos = gridToPixel(node, graphState.grid);
+            if (
+                nodeCircleIntersectsRect(
+                    nodePos,
+                    View.INITIAL_NODE_RADIUS,
+                    rect
+                )
+            ) {
                 elements.push({ type: "node", id: node.id });
             }
         });
@@ -557,12 +694,14 @@ class CanvasView {
         edges.forEach((edge) => {
             const fromNode = graph.findNodeById(edge.source);
             const toNode = graph.findNodeById(edge.target);
+            const fromPos = gridToPixel(fromNode, graphState.grid);
+            const toPos = gridToPixel(toNode, graphState.grid);
             const toleranceSq =
-                (View.EDGE_CLICK_TOLERANCE / View.viewState.zoom) ** 2;
+                (View.EDGE_CLICK_TOLERANCE / getZoomRatio()) ** 2;
             if (
                 fromNode &&
                 toNode &&
-                edgeIntersectsRect(fromNode, toNode, toleranceSq, rect)
+                edgeIntersectsRect(fromPos, toPos, toleranceSq, rect)
             ) {
                 if (!elements.find((el) => el.id === edge.id)) {
                     elements.push({ type: "edge", id: edge.id });
@@ -576,71 +715,47 @@ class CanvasView {
     /**
      * 计算“幽灵节点”的吸附位置。
      * @param {{x: number, y: number}} pos - 鼠标当前坐标。
-     * @returns {{x: number, y: number} | null} 吸附点坐标或null。
+     * @returns {{gridX: number, gridY: number, type: number} | null} 吸附点坐标或null。
      */
     calculateGhostNodePos(pos) {
-        if (View.viewState.currentMode !== "edit") return null;
-        const snappedPos = this.snapToGrid(pos);
+        if (View.viewState.currentMode !== ModeType.EDIT) return null;
+        const snappedGridPos = pixelToGrid(pos, graphState.grid);
+        if (!snappedGridPos) return null;
+
+        const snappedPixelPos = gridToPixel(snappedGridPos, graphState.grid);
         const dist = Math.sqrt(
-            (pos.x - snappedPos.x) ** 2 + (pos.y - snappedPos.y) ** 2
+            (pos.x - snappedPixelPos.x) ** 2 + (pos.y - snappedPixelPos.y) ** 2
         );
-        const nodeExists = graph.hasNodeAt(snappedPos);
+        const nodeExists = graph.hasNodeAtGridPos(snappedGridPos);
         return dist <= View.INITIAL_NODE_RADIUS && !nodeExists
-            ? snappedPos
+            ? snappedGridPos
             : null;
     }
 
     /**
-     * 将坐标吸附到最近的网格点。
-     * @param {{x: number, y: number}} pos - 原始坐标。
-     * @returns {{x: number, y: number}} 吸附后的坐标。
+     * 计算并返回图中所有节点的像素坐标边界。
+     * @returns {{minX: number, minY: number, maxX: number, maxY: number} | null}
      */
-    snapToGrid({ x, y }) {
-        const S = View.INITIAL_GRID_SPACING;
-        if (View.viewState.canvasLayout === "square") {
-            const points = [
-                { x: Math.round(x / S) * S, y: Math.round(y / S) * S },
-                {
-                    x: Math.round(x / S - 0.5) * S + 0.5 * S,
-                    y: Math.round(y / S - 0.5) * S + 0.5 * S,
-                },
-            ];
-            return points.reduce((closest, p) =>
-                (x - p.x) ** 2 + (y - p.y) ** 2 <
-                (x - closest.x) ** 2 + (y - closest.y) ** 2
-                    ? p
-                    : closest
-            );
-        }
-        if (View.viewState.canvasLayout === "triangular") {
-            const h = (S * Math.sqrt(3)) / 2;
-            const row = Math.floor(y / h);
-            let candidates = [];
-            for (let r_offset = -1; r_offset <= 1; r_offset++) {
-                const r = row + r_offset;
-                const staggerOffset = (r % 2) * (S / 2);
-                const col = Math.floor((x - staggerOffset) / S);
-                for (let c_offset = -1; c_offset <= 1; c_offset++) {
-                    const c = col + c_offset;
-                    const rhombusX = c * S + staggerOffset;
-                    const rhombusY = r * h;
-                    candidates.push(
-                        { x: rhombusX + S / 2, y: rhombusY },
-                        { x: rhombusX, y: rhombusY + h },
-                        { x: rhombusX + S, y: rhombusY + h },
-                        { x: rhombusX + S / 2, y: rhombusY + (2 * h) / 3 },
-                        { x: rhombusX + S / 2, y: rhombusY + h + h / 3 }
-                    );
-                }
-            }
-            return candidates.reduce((closest, p) =>
-                (x - p.x) ** 2 + (y - p.y) ** 2 <
-                (x - closest.x) ** 2 + (y - closest.y) ** 2
-                    ? p
-                    : closest
-            );
-        }
-        return { x, y };
+    getGraphBounds() {
+        const { nodes } = graph.getGraph();
+        if (nodes.length === 0) return null;
+
+        const bounds = {
+            minX: Infinity,
+            minY: Infinity,
+            maxX: -Infinity,
+            maxY: -Infinity,
+        };
+
+        nodes.forEach((node) => {
+            const pos = gridToPixel(node, graphState.grid);
+            bounds.minX = Math.min(bounds.minX, pos.x);
+            bounds.maxX = Math.max(bounds.maxX, pos.x);
+            bounds.minY = Math.min(bounds.minY, pos.y);
+            bounds.maxY = Math.max(bounds.maxY, pos.y);
+        });
+
+        return bounds;
     }
 }
 
@@ -648,19 +763,19 @@ const canvasView = new CanvasView();
 export default canvasView;
 
 // ===================================================================
-// ======================   Selection utils   ========================
+// =======================   Selection utils   =======================
 // ===================================================================
 
 /**
  * 检查一个圆形节点是否与一个矩形相交。
  * @private
- * @param {Node} node - 要检查的节点对象。
- * @param {number} r - 节点半径。
+ * @param {{x: number, y: number}} center - 圆心坐标。
+ * @param {number} r - 圆的半径。
  * @param {{x1: number, y1: number, x2: number, y2: number}} rect - 矩形选框。
  * @returns {boolean} 如果相交则返回 true。
  */
-function nodeIntersectsRect(node, r, rect) {
-    const { x: cx, y: cy } = node;
+function nodeCircleIntersectsRect(center, r, rect) {
+    const { x: cx, y: cy } = center;
     const { x1, y1, x2, y2 } = rect;
     const testX = Math.max(x1, Math.min(cx, x2));
     const testY = Math.max(y1, Math.min(cy, y2));
@@ -673,22 +788,22 @@ function nodeIntersectsRect(node, r, rect) {
 /**
  * 检查一条边（线段）是否与一个矩形相交, 包含容差。
  * @private
- * @param {Node} node1 - 边的起始节点。
- * @param {Node} node2 - 边的结束节点。
+ * @param {{x: number, y: number}} pos1 - 线段的起点坐标。
+ * @param {{x: number, y: number}} pos2 - 线段的终点坐标。
  * @param {number} toleranceSq - 容差平方。
  * @param {{x1: number, y1: number, x2: number, y2: number}} rect - 矩形选框。
  * @returns {boolean} 如果相交则返回 true。
  */
-function edgeIntersectsRect(node1, node2, toleranceSq, rect) {
+function edgeIntersectsRect(pos1, pos2, toleranceSq, rect) {
     // 1. 首先检查是否存在直接的几何相交，这能处理选框穿过边的情况。
-    if (edgeIntersectsRectGeometrically(node1, node2, rect)) {
+    if (edgeIntersectsRectGeometrically(pos1, pos2, rect)) {
         return true;
     }
 
     // 2. 如果不相交，再检查它们之间的距离是否在容差范围内。
     //    这能处理选框与边“擦肩而过”的情况。
-    const p1 = { x: node1.x, y: node1.y };
-    const p2 = { x: node2.x, y: node2.y };
+    const p1 = { x: pos1.x, y: pos1.y };
+    const p2 = { x: pos2.x, y: pos2.y };
 
     // 检查从线段端点到矩形的距离
     if (pointToRectDistSq(p1, rect) < toleranceSq) {
@@ -717,14 +832,14 @@ function edgeIntersectsRect(node1, node2, toleranceSq, rect) {
 /**
  * 检查一条边（线段）是否与一个矩形几何相交（无容差）。
  * @private
- * @param {Node} node1 - 边的起始节点。
- * @param {Node} node2 - 边的结束节点。
+ * @param {{x: number, y: number}} pos1 - 线段的起点坐标。
+ * @param {{x: number, y: number}} pos2 - 线段的终点坐标。
  * @param {{x1: number, y1: number, x2: number, y2: number}} rect - 矩形选框。
  * @returns {boolean} 如果相交则返回 true。
  */
-function edgeIntersectsRectGeometrically(node1, node2, rect) {
-    const p1 = { x: node1.x, y: node1.y };
-    const p2 = { x: node2.x, y: node2.y };
+function edgeIntersectsRectGeometrically(pos1, pos2, rect) {
+    const p1 = { x: pos1.x, y: pos1.y };
+    const p2 = { x: pos2.x, y: pos2.y };
     const { x1, y1, x2, y2 } = rect;
 
     // 检查是否有任一端点在矩形内部
@@ -821,4 +936,155 @@ function pointToSegmentDistSq(p, a, b) {
     const closestX = a.x + t * dx;
     const closestY = a.y + t * dy;
     return (p.x - closestX) ** 2 + (p.y - closestY) ** 2;
+}
+
+// ===================================================================
+// ====================   Grid -- Pixel utils   ======================
+// ===================================================================
+
+/**
+ * 将抽象网格坐标转换为像素坐标。
+ * @param {{gridX: number, gridY: number, type: NodeType}} gridPos - 抽象坐标。
+ * @param {GridType} grid - 当前的网格类型。
+ * @returns {{x: number, y: number}} 像素坐标。
+ */
+export function gridToPixel(gridPos, grid) {
+    const S = View.INITIAL_GRID_SPACING;
+    const { gridX, gridY, type } = gridPos;
+
+    if (grid === GridType.SQUARE) {
+        if (type === NodeType.SQUARE_VERTEX) {
+            return { x: gridX * S, y: gridY * S };
+        }
+        if (type === NodeType.SQUARE_CENTER) {
+            return { x: (gridX + 0.5) * S, y: (gridY + 0.5) * S };
+        }
+    }
+
+    if (grid === GridType.TRIANGULAR) {
+        const h = (S * Math.sqrt(3)) / 2;
+
+        if (type === NodeType.TRIANGLE_VERTEX) {
+            const staggerOffset = (gridY % 2) * (S / 2);
+            return { x: gridX * S + staggerOffset, y: gridY * h };
+        }
+        // For centers, first calculate their anchor vertex's position
+        const staggerOffset = (gridY % 2) * (S / 2);
+        const vertexX = gridX * S + staggerOffset;
+        const vertexY = gridY * h;
+
+        if (type === NodeType.TRIANGLE_UP_CENTER) {
+            // Anchored to its top tip vertex (gridX,gridY)
+            return { x: vertexX, y: vertexY - (2 * h) / 3 };
+        }
+        if (type === NodeType.TRIANGLE_DOWN_CENTER) {
+            // Anchored to its bottom tip vertex (gridX,gridY)
+            return { x: vertexX, y: vertexY + (2 * h) / 3 };
+        }
+    }
+    // Fallback
+    return { x: 0, y: 0 };
+}
+
+/**
+ * 将像素坐标吸附到最近的网格点，返回抽象网格坐标。
+ * @param {{x: number, y: number}} pos - 原始坐标。
+ * @param {GridType} grid - 当前的网格类型。
+ * @returns {{gridX: number, gridY: number, type: NodeType} | null} 吸附后的抽象坐标。
+ */
+function pixelToGrid(pos, grid) {
+    const S = View.INITIAL_GRID_SPACING;
+    const { x, y } = pos;
+
+    if (grid === GridType.SQUARE) {
+        const candidates = [
+            // 顶点
+            {
+                gridX: Math.round(x / S),
+                gridY: Math.round(y / S),
+                type: NodeType.SQUARE_VERTEX,
+            },
+            // 中心点
+            {
+                gridX: Math.floor(x / S),
+                gridY: Math.floor(y / S),
+                type: NodeType.SQUARE_CENTER,
+            },
+        ];
+
+        return candidates
+            .map((p) => ({
+                point: p,
+                distSq:
+                    (x - gridToPixel(p, grid).x) ** 2 +
+                    (y - gridToPixel(p, grid).y) ** 2,
+            }))
+            .reduce((closest, p) => (p.distSq < closest.distSq ? p : closest))
+            .point;
+    }
+
+    if (grid === GridType.TRIANGULAR) {
+        const h = (S * Math.sqrt(3)) / 2;
+        let candidates = [];
+
+        // --- Case 1: Guess candidate vertices ---
+        const gridY_est_vert = Math.round(y / h);
+        for (let gridY_offset = -1; gridY_offset <= 1; gridY_offset++) {
+            const gridY = gridY_est_vert + gridY_offset;
+            const staggerOffset = (gridY % 2) * (S / 2);
+            const gridX_est = Math.round((x - staggerOffset) / S);
+            for (let gridX_offset = -1; gridX_offset <= 1; gridX_offset++) {
+                const gridX = gridX_est + gridX_offset;
+                candidates.push({
+                    gridX: gridX,
+                    gridY: gridY,
+                    type: NodeType.TRIANGLE_VERTEX,
+                });
+            }
+        }
+
+        // --- Case 2: Guess candidate up-centers (▲) ---
+        const gridY_est_up = Math.round((y + (2 * h) / 3) / h);
+        for (let gridY_offset = -1; gridY_offset <= 1; gridY_offset++) {
+            const gridY = gridY_est_up + gridY_offset;
+            const staggerOffset = (gridY % 2) * (S / 2);
+            const gridX_est = Math.round((x - staggerOffset) / S);
+            for (let gridX_offset = -1; gridX_offset <= 1; gridX_offset++) {
+                const gridX = gridX_est + gridX_offset;
+                candidates.push({
+                    gridX: gridX,
+                    gridY: gridY,
+                    type: NodeType.TRIANGLE_UP_CENTER,
+                });
+            }
+        }
+
+        // --- Case 3: Guess candidate down-centers (▼) ---
+        const gridY_est_down = Math.round((y - (2 * h) / 3) / h);
+        for (let gridY_offset = -1; gridY_offset <= 1; gridY_offset++) {
+            const gridY = gridY_est_down + gridY_offset;
+            const staggerOffset = (gridY % 2) * (S / 2);
+            const gridX_est = Math.round((x - staggerOffset) / S);
+            for (let gridX_offset = -1; gridX_offset <= 1; gridX_offset++) {
+                const gridX = gridX_est + gridX_offset;
+                candidates.push({
+                    gridX: gridX,
+                    gridY: gridY,
+                    type: NodeType.TRIANGLE_DOWN_CENTER,
+                });
+            }
+        }
+
+        // Find the best candidate among all collected types
+        return candidates
+            .map((p) => ({
+                point: p,
+                distSq:
+                    (pos.x - gridToPixel(p, grid).x) ** 2 +
+                    (pos.y - gridToPixel(p, grid).y) ** 2,
+            }))
+            .reduce((closest, p) => (p.distSq < closest.distSq ? p : closest))
+            .point;
+    }
+    return null;
 }

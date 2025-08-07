@@ -4,7 +4,7 @@
  */
 
 import graph from "../model/graph.js";
-import { viewState } from "../view/view.js";
+import { viewState, ModeType } from "../view/view.js";
 import consoleView from "../view/console.js";
 
 /**
@@ -120,11 +120,11 @@ export class DeleteElementsCommand extends Command {
 }
 
 /**
- * @class InvertStateCommand
+ * @class InitInvertCommand
  * @description 反转节点初始状态的命令。
  * @extends Command
  */
-export class InvertStateCommand extends Command {
+export class InitInvertCommand extends Command {
     /**
      * @param {string[]} nodeIds - 要反转状态的节点ID数组。
      */
@@ -145,6 +145,50 @@ export class InvertStateCommand extends Command {
      */
     redo() {
         this.nodeIds.forEach((id) => graph.toggleInitialState(id));
+    }
+}
+
+/**
+ * @class InitTurnOffCommand
+ * @description 将所有选中节点的初始状态设置为关闭的命令
+ * @extends Command
+ */
+export class InitTurnOffCommand extends Command {
+    /**
+     * @param {string[]} nodeIds - 要设置状态的节点ID数组。
+     */
+    constructor(nodeIds) {
+        super();
+        this.nodeIds = nodeIds;
+        this.previousStates = new Map(); // 存储修改前的状态
+    }
+
+    /**
+     * 撤销操作，恢复节点的原始初始状态。
+     */
+    undo() {
+        this.nodeIds.forEach((id) => {
+            const node = graph.findNodeById(id);
+            if (node && this.previousStates.has(id)) {
+                node.initialOn = this.previousStates.get(id);
+            }
+        });
+    }
+
+    /**
+     * 重做操作，将所有选中节点的初始状态设置为关闭。
+     */
+    redo() {
+        this.previousStates.clear();
+        this.nodeIds.forEach((id) => {
+            const node = graph.findNodeById(id);
+            if (node) {
+                // 保存当前状态用于撤销
+                this.previousStates.set(id, node.initialOn);
+                // 设置为关闭状态
+                node.initialOn = false;
+            }
+        });
     }
 }
 
@@ -242,7 +286,8 @@ class HistoryManager {
      * @returns {boolean}
      */
     undo() {
-        if (!this.canUndo() || viewState.currentMode !== "edit") return false;
+        if (!this.canUndo() || viewState.currentMode !== ModeType.EDIT)
+            return false;
 
         const command = historyState.undoStack.pop();
         command.undo();

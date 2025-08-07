@@ -95,7 +95,6 @@ class Solver {
     // ===================================================================
 
     /**
-     * @private
      * 计算并返回图对应矩阵的秩信息。
      * @returns {{n: number, k: number}} 节点数量n和零空间秩k。
      */
@@ -142,7 +141,6 @@ class Solver {
     }
 
     /**
-     * @private
      * 求解当前图。
      * @returns {{hasSolution: boolean, nodesToPress: string[], message: string}} 计算结果。
      */
