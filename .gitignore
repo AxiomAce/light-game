@@ -22,9 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-jsconfig.json
-.cursorignore
-.d.ts/
 
 # Local Development (not pushed to the remote repository)
+# src/.example/
+.cursorignore
 local-document.md

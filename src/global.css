@@ -1,0 +1,8 @@
+/*
+   * 为页面主体和 body 设置基本样式。
+   */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  overflow: hidden; /* 防止滚动条出现 */
+}
